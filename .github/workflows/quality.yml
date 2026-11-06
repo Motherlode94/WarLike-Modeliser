@@ -7,7 +7,7 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,3 +22,13 @@ jobs:
           test -s app.js
           grep -q 'app.js' index.html
           grep -q 'studio-ui.css' index.html
+      - name: Install Chromium for UI regression
+        run: |
+          npm init -y
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Run browser UI regression
+        run: |
+          python3 -m http.server 8765 --bind 127.0.0.1 >/tmp/warlike-ui.log 2>&1 &
+          sleep 2
+          node tests/browser-smoke.mjs
