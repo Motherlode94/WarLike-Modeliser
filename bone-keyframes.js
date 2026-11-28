@@ -1,0 +1,10 @@
+import * as THREE from 'three';
+export function validBoneKeys(keys,rig){return keys==null||Array.isArray(keys)&&keys.length<=240&&keys.every((k,i)=>k&&Number.isFinite(k.time)&&k.time>=0&&k.time<=60&&(!i||keys[i-1].time<k.time)&&Array.isArray(k.rotations)&&k.rotations.length===rig?.length&&k.rotations.every(v=>Array.isArray(v)&&v.length===3&&v.every(Number.isFinite)))}
+export function boneTracks(bones,keys){if(!keys?.length)return [];return bones.map((b,i)=>new THREE.QuaternionKeyframeTrack(b.uuid+'.quaternion',keys.map(k=>k.time),keys.flatMap(k=>new THREE.Quaternion().setFromEuler(new THREE.Euler(...k.rotations[i])).toArray())))}
+export function bindBoneKeys({getSelected,checkpoint,notify}){
+ const panel=document.createElement('details');panel.innerHTML='<summary>Armature · Keyframes</summary><label>Temps (s)<input type="number" min="0" max="60" step=".1" value="0"></label><button type="button">Capturer les rotations</button><button type="button">Supprimer la clé</button><output></output><p>Les rotations du guide deviennent des clés GLB ; aperçu animé dans un lecteur GLB.</p>';document.getElementById('nativeModelInspector').append(panel);
+ const time=panel.querySelector('input'),[add,remove]=panel.querySelectorAll('button'),out=panel.querySelector('output');
+ function render(){out.textContent=(getSelected()?.userData.boneKeys||[]).map(k=>k.time.toFixed(2)+' s').join(' · ')||'Aucune clé'}
+ add.onclick=()=>{const o=getSelected(),t=Number(time.value);if(!o?.userData.rig||!Number.isFinite(t)||t<0||t>60)return notify('Armature ou temps invalide.');const next=(o.userData.boneKeys||[]).filter(k=>k.time!==t);if(next.length>=240)return notify('Limite de clés.');checkpoint();next.push({time:t,rotations:o.userData.rig.map(b=>b.rotation.slice())});o.userData.boneKeys=next.sort((a,b)=>a.time-b.time);render()};
+ remove.onclick=()=>{const o=getSelected(),t=Number(time.value);if(!o?.userData.boneKeys?.some(k=>k.time===t))return;checkpoint();o.userData.boneKeys=o.userData.boneKeys.filter(k=>k.time!==t);render()};return {render};
+}
