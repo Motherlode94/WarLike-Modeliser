@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
 import {chromium} from 'playwright';
 const browser=await chromium.launch({headless:true,args:['--enable-webgl','--use-gl=angle','--use-angle=swiftshader']});
 try{
@@ -35,6 +36,11 @@ try{
  await page.locator('#modelFile').setInputFiles(await file.path());
  await page.waitForFunction(()=>document.querySelector('#message').textContent==='Modèle ouvert.');
  assert.equal(await page.locator('#modelOutliner button').count(),2);
+ const [glb]=await Promise.all([page.waitForEvent('download'),page.locator('#modelExport').click()]);
+ assert.ok(glb.suggestedFilename().endsWith('.glb'));
+ const bytes=await readFile(await glb.path());assert.equal(bytes.toString('ascii',0,4),'glTF');assert.equal(bytes.readUInt32LE(4),2);assert.equal(bytes.readUInt32LE(8),bytes.length);
+ const jsonLength=bytes.readUInt32LE(12);assert.equal(bytes.readUInt32LE(16),0x4e4f534a);const doc=JSON.parse(bytes.toString('utf8',20,20+jsonLength));assert.equal(doc.asset.version,'2.0');assert.equal(doc.meshes.length,2);assert.ok(doc.meshes.every(m=>m.primitives.every(p=>Number.isInteger(p.attributes.POSITION))));
+ const result=await page.evaluate(async data=>{const {GLTFLoader}=await import('three/addons/loaders/GLTFLoader.js');const raw=Uint8Array.from(atob(data),c=>c.charCodeAt(0));const loaded=await new GLTFLoader().parseAsync(raw.buffer,'');let meshes=0;loaded.scene.traverse(o=>{if(o.isMesh)meshes++});return meshes},bytes.toString('base64'));assert.equal(result,2);
  await page.locator('#tab2d').click();
  assert.equal(await page.locator('#canvas').evaluate(el=>el.classList.contains('hidden')),false);
  assert.deepEqual(errors,[],'unexpected Modeliser JavaScript errors');
