@@ -51,6 +51,23 @@ export function createModelWorkspace({scene,camera,renderer,orbit,notify}){
  document.querySelectorAll('[data-gizmo]').forEach(b=>b.onclick=()=>{transform.setMode(b.dataset.gizmo);document.querySelectorAll('[data-gizmo]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)))});
  for(const f of fields)f.onchange=()=>{if(!selected)return;const [key,axis]=f.dataset.transform.split('.'),v=Number(f.value);if(!Number.isFinite(v)||f.value.trim()===''||(key==='scale'&&v<=0)){refresh();return}checkpoint();selected[key][axis]=key==='rotation'?THREE.MathUtils.degToRad(v):v;refresh()};
  document.getElementById('modelColor').onchange=e=>{if(selected){checkpoint();selected.material.color.set(e.target.value)}};
+ // Bake explicit modeling operations; these do not pretend to be a live modifier stack.
+ document.getElementById('modelArray').onclick=()=>{
+  if(!selected||editMode!=='object')return notify('Sélectionne un objet.');
+  const count=Number(document.getElementById('arrayCount').value),offset=Number(document.getElementById('arrayOffset').value);
+  if(!Number.isInteger(count)||count<2||count>32||!Number.isFinite(offset)||Math.abs(offset)>100||group.children.length+count-1>500)return notify('Paramètres Array invalides.');
+  checkpoint();const source=selected;
+  for(let i=1;i<count;i++){const o=source.clone();o.geometry=source.geometry.clone();o.material=source.material.clone();o.name=source.name+' Array '+(++serial);o.position.x+=offset*i;group.add(o)}refresh();notify('Réseau créé.');
+ };
+ document.getElementById('modelMirror').onclick=()=>{
+  if(!selected||editMode!=='object')return notify('Sélectionne un objet.');
+  const axis=document.getElementById('mirrorAxis').value;if(!['x','y','z'].includes(axis))return;
+  checkpoint();const g=selected.geometry,p=g.attributes.position,component={x:0,y:1,z:2}[axis];
+  for(let i=0;i<p.count;i++){const j=i*3+component;p.array[j]=-p.array[j]}p.needsUpdate=true;
+  if(g.index){const a=g.index.array;for(let i=0;i<a.length;i+=3){const t=a[i+1];a[i+1]=a[i+2];a[i+2]=t}g.index.needsUpdate=true}
+  else{for(const attr of Object.values(g.attributes)){const a=attr.array,n=attr.itemSize;for(let i=0;i<attr.count;i+=3)for(let k=0;k<n;k++){const j=(i+1)*n+k,l=(i+2)*n+k,t=a[j];a[j]=a[l];a[l]=t}attr.needsUpdate=true}}
+  g.computeVertexNormals();g.computeBoundingBox();g.computeBoundingSphere();refresh();notify('Miroir appliqué sur '+axis.toUpperCase()+'.');
+ };
  document.getElementById('modelDuplicate').onclick=duplicate;document.getElementById('modelDelete').onclick=remove;
  document.getElementById('modelRename').onclick=()=>{if(!selected)return;const value=prompt('Nom de l’objet',selected.name);if(value?.trim()){checkpoint();selected.name=value.trim().slice(0,80);refresh()}};
  function serialize(){return group.children.map(o=>({kind:o.userData.kind,name:o.name,position:o.position.toArray(),rotation:[o.rotation.x,o.rotation.y,o.rotation.z],scale:o.scale.toArray(),color:o.material.color.getHex(),vertices:Array.from(o.geometry.attributes.position.array),indices:o.geometry.index?Array.from(o.geometry.index.array):null}))}
