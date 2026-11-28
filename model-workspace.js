@@ -3,26 +3,75 @@ import {TransformControls} from 'three/addons/controls/TransformControls.js';
 export function createModelWorkspace({scene,camera,renderer,orbit,notify}){
  const group=new THREE.Group();group.name='Modeliser';scene.add(group);
  const transform=new TransformControls(camera,renderer.domElement);scene.add(transform.getHelper());transform.setSpace('local');
- let selected=null,enabled=false,serial=0;
+ let selected=null,enabled=false,serial=0,editMode='object',picked=[];
+ const past=[],future=[];let restoring=false,gesture=null;
+ function updateHistory(){document.getElementById('modelUndo').disabled=!past.length;document.getElementById('modelRedo').disabled=!future.length}
+ function checkpoint(before=serialize()){if(restoring)return;past.push(before);if(past.length>24)past.shift();future.length=0;updateHistory()}
+ function travel(source,target){if(!source.length)return;const current=serialize(),next=source.pop();restoring=true;try{restore(next);target.push(current)}finally{restoring=false;updateHistory()}}
+ document.getElementById('modelUndo').onclick=()=>travel(past,future);document.getElementById('modelRedo').onclick=()=>travel(future,past);
+ document.getElementById('modelSnap').onchange=e=>{const on=e.target.checked;transform.setTranslationSnap(on ? .25 : null);transform.setRotationSnap(on?Math.PI/12:null);transform.setScaleSnap(on ? .1 : null)};
+ document.getElementById('modelPivotSpace').onchange=e=>transform.setSpace(e.target.value);
+ document.addEventListener('keydown',e=>{if(!enabled||e.target?.closest('input,textarea,select,[contenteditable]'))return;if((e.ctrlKey||e.metaKey)&&['z','y'].includes(e.key.toLowerCase())){e.preventDefault();e.stopImmediatePropagation();travel(e.shiftKey||e.key.toLowerCase()==='y'?future:past,e.shiftKey||e.key.toLowerCase()==='y'?past:future)}},true);
+ const markers=new THREE.Group();scene.add(markers);
+ function clearMarkers(){for(const o of [...markers.children]){markers.remove(o);o.geometry.dispose();o.material.dispose()}}
+ function setEditMode(mode){editMode=mode;picked=[];clearMarkers();transform.detach();if(enabled&&selected&&mode==='object')transform.attach(selected);document.getElementById('meshSelection').textContent='Aucune sélection'}
+ function showSelection(ids){picked=ids;clearMarkers();if(!selected)return;const p=selected.geometry.attributes.position;for(const i of ids){const o=new THREE.Mesh(new THREE.SphereGeometry(.035,8,6),new THREE.MeshBasicMaterial({color:0xffaa22,depthTest:false}));o.position.copy(selected.localToWorld(new THREE.Vector3().fromBufferAttribute(p,i)));markers.add(o)}document.getElementById('meshSelection').textContent=ids.length+' sommet(s) sélectionné(s)'}
+ function pickMesh(hit){if(!hit?.face){showSelection([]);return}const p=selected.geometry.attributes.position,ids=[hit.face.a,hit.face.b,hit.face.c];const point=selected.worldToLocal(hit.point.clone());ids.sort((a,b)=>new THREE.Vector3().fromBufferAttribute(p,a).distanceToSquared(point)-new THREE.Vector3().fromBufferAttribute(p,b).distanceToSquared(point));showSelection(ids.slice(0,editMode==='vertex'?1:editMode==='edge'?2:3))}
+ document.getElementById('meshMode').onchange=e=>setEditMode(e.target.value);
+ document.getElementById('meshMove').onclick=()=>{if(!selected||!picked.length)return;const delta=['X','Y','Z'].map(a=>Number(document.getElementById('meshDelta'+a).value));if(!delta.every(Number.isFinite))return;checkpoint();const p=selected.geometry.attributes.position;const originals=picked.map(i=>new THREE.Vector3().fromBufferAttribute(p,i));for(let i=0;i<p.count;i++){const v=new THREE.Vector3().fromBufferAttribute(p,i);if(originals.some(o=>o.distanceToSquared(v)<1e-12))p.setXYZ(i,v.x+delta[0],v.y+delta[1],v.z+delta[2])}p.needsUpdate=true;selected.geometry.computeVertexNormals();selected.geometry.computeBoundingSphere();selected.geometry.computeBoundingBox();showSelection(picked)};
+ // Face extrusion replaces the selected triangle with a cap and three side quads.
+ function extrudeFace(){
+  if(!selected||editMode!=='face'||picked.length!==3)return notify('Sélectionne une face triangulaire.');
+  const distance=Number(document.getElementById('extrudeDistance').value);if(!Number.isFinite(distance)||Math.abs(distance)<1e-6||Math.abs(distance)>100)return notify('Distance invalide.');
+  const g=selected.geometry,p=g.attributes.position,vertices=picked.map(i=>new THREE.Vector3().fromBufferAttribute(p,i));
+  const indices=g.index?Array.from(g.index.array):Array.from({length:p.count},(_,i)=>i);
+  let face=-1;for(let i=0;i<indices.length;i+=3)if(indices.slice(i,i+3).every(j=>picked.includes(j))){face=i;break}if(face<0)return;
+  const order=indices.slice(face,face+3),v=order.map(i=>new THREE.Vector3().fromBufferAttribute(p,i));
+  const normal=v[1].clone().sub(v[0]).cross(v[2].clone().sub(v[0])).normalize();if(normal.lengthSq()<.5)return notify('Face dégénérée.');
+  const top=v.map(x=>x.clone().addScaledVector(normal,distance)),positions=Array.from(p.array),start=p.count;
+  for(const x of top)positions.push(...x.toArray());
+  indices.splice(face,3,start,start+1,start+2);
+  for(let i=0;i<3;i++){const j=(i+1)%3;indices.push(order[i],order[j],start+j,order[i],start+j,start+i)}
+  checkpoint();const next=new THREE.BufferGeometry();next.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));next.setIndex(indices);next.computeVertexNormals();next.computeBoundingBox();next.computeBoundingSphere();selected.geometry=next;g.dispose();showSelection([start,start+1,start+2]);notify('Face extrudée.');
+ }
+ document.getElementById('meshExtrude').onclick=extrudeFace;
  const list=document.getElementById('modelOutliner'),fields=[...document.querySelectorAll('[data-transform]')];
  const geometries={cube:()=>new THREE.BoxGeometry(1,1,1),sphere:()=>new THREE.SphereGeometry(.6,24,16),cylinder:()=>new THREE.CylinderGeometry(.5,.5,1,24),plane:()=>new THREE.PlaneGeometry(1,1),cone:()=>new THREE.ConeGeometry(.6,1,24)};
  function refresh(){list.replaceChildren();for(const object of group.children){const b=document.createElement('button');b.textContent=object.name;b.setAttribute('aria-pressed',String(object===selected));b.onclick=()=>select(object);list.append(b)}for(const f of fields){const [key,axis]=f.dataset.transform.split('.');f.disabled=!selected;f.value=selected?Number((key==='rotation'?THREE.MathUtils.radToDeg(selected[key][axis]):selected[key][axis]).toFixed(4)):''}document.getElementById('modelColor').disabled=!selected;if(selected)document.getElementById('modelColor').value='#'+selected.material.color.getHexString();}
- function select(o){selected=o||null;transform.detach();if(enabled&&selected)transform.attach(selected);refresh()}
- function add(kind){if(!geometries[kind])return;const o=new THREE.Mesh(geometries[kind](),new THREE.MeshStandardMaterial({color:0x9ab6cf,roughness:.65,side:kind==='plane'?THREE.DoubleSide:THREE.FrontSide}));o.name=kind+' '+(++serial);o.userData.kind=kind;group.add(o);select(o);return o}
- function remove(){if(!selected)return;const o=selected;select(null);group.remove(o);o.geometry.dispose();o.material.dispose();refresh()}
- function duplicate(){if(!selected)return;const o=selected.clone();o.geometry=selected.geometry.clone();o.material=selected.material.clone();o.name=selected.userData.kind+' '+(++serial);o.position.x+=.25;group.add(o);select(o)}
- function setEnabled(v){enabled=v;group.visible=v;transform.detach();if(v&&selected)transform.attach(selected);refresh()}
- transform.addEventListener('dragging-changed',e=>{orbit.enabled=!e.value});transform.addEventListener('objectChange',refresh);
+ function select(o){selected=o||null;picked=[];clearMarkers();transform.detach();if(enabled&&selected&&editMode==='object')transform.attach(selected);refresh()}
+ function add(kind){if(!geometries[kind]||group.children.length>=500)return;checkpoint();const o=new THREE.Mesh(geometries[kind](),new THREE.MeshStandardMaterial({color:0x9ab6cf,roughness:.65,side:kind==='plane'?THREE.DoubleSide:THREE.FrontSide}));o.name=kind+' '+(++serial);o.userData.kind=kind;group.add(o);select(o);return o}
+ function remove(){if(!selected)return;checkpoint();const o=selected;select(null);group.remove(o);o.geometry.dispose();o.material.dispose();refresh()}
+ function duplicate(){if(!selected||group.children.length>=500)return;checkpoint();const o=selected.clone();o.geometry=selected.geometry.clone();o.material=selected.material.clone();o.name=selected.userData.kind+' '+(++serial);o.position.x+=.25;group.add(o);select(o)}
+ function setEnabled(v){enabled=v;group.visible=v;transform.detach();markers.visible=v;if(v&&selected&&editMode==='object')transform.attach(selected);refresh()}
+ transform.addEventListener('dragging-changed',e=>{orbit.enabled=!e.value;if(e.value)gesture=serialize();else if(gesture){if(JSON.stringify(gesture)!==JSON.stringify(serialize()))checkpoint(gesture);gesture=null}});transform.addEventListener('objectChange',refresh);
  const ray=new THREE.Raycaster(),pointer=new THREE.Vector2();let down=null;
  renderer.domElement.addEventListener('pointerdown',e=>{down=e.button===0&&!transform.axis?{x:e.clientX,y:e.clientY}:null});
- renderer.domElement.addEventListener('pointerup',e=>{if(!enabled||!down||transform.dragging||Math.hypot(e.clientX-down.x,e.clientY-down.y)>4){down=null;return}down=null;const r=renderer.domElement.getBoundingClientRect();pointer.set((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1);ray.setFromCamera(pointer,camera);select(ray.intersectObjects(group.children,false)[0]?.object)});
+ renderer.domElement.addEventListener('pointerup',e=>{if(!enabled||!down||transform.dragging||Math.hypot(e.clientX-down.x,e.clientY-down.y)>4){down=null;return}down=null;const r=renderer.domElement.getBoundingClientRect();pointer.set((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1);ray.setFromCamera(pointer,camera);const hit=ray.intersectObjects(group.children,false)[0];if(editMode==='object')select(hit?.object);else if(hit?.object===selected)pickMesh(hit);else{select(hit?.object);if(hit)pickMesh(hit)}});
  document.querySelectorAll('[data-primitive]').forEach(b=>b.onclick=()=>add(b.dataset.primitive));
  document.querySelectorAll('[data-gizmo]').forEach(b=>b.onclick=()=>{transform.setMode(b.dataset.gizmo);document.querySelectorAll('[data-gizmo]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)))});
- for(const f of fields)f.onchange=()=>{if(!selected)return;const [key,axis]=f.dataset.transform.split('.'),v=Number(f.value);if(!Number.isFinite(v)||f.value.trim()===''||(key==='scale'&&v<=0)){refresh();return}selected[key][axis]=key==='rotation'?THREE.MathUtils.degToRad(v):v;refresh()};
- document.getElementById('modelColor').oninput=e=>{if(selected)selected.material.color.set(e.target.value)};
+ for(const f of fields)f.onchange=()=>{if(!selected)return;const [key,axis]=f.dataset.transform.split('.'),v=Number(f.value);if(!Number.isFinite(v)||f.value.trim()===''||(key==='scale'&&v<=0)){refresh();return}checkpoint();selected[key][axis]=key==='rotation'?THREE.MathUtils.degToRad(v):v;refresh()};
+ document.getElementById('modelColor').onchange=e=>{if(selected){checkpoint();selected.material.color.set(e.target.value)}};
+ // Bake explicit modeling operations; these do not pretend to be a live modifier stack.
+ document.getElementById('modelArray').onclick=()=>{
+  if(!selected||editMode!=='object')return notify('Sélectionne un objet.');
+  const count=Number(document.getElementById('arrayCount').value),offset=Number(document.getElementById('arrayOffset').value);
+  if(!Number.isInteger(count)||count<2||count>32||!Number.isFinite(offset)||Math.abs(offset)>100||group.children.length+count-1>500)return notify('Paramètres Array invalides.');
+  checkpoint();const source=selected;
+  for(let i=1;i<count;i++){const o=source.clone();o.geometry=source.geometry.clone();o.material=source.material.clone();o.name=source.name+' Array '+(++serial);o.position.x+=offset*i;group.add(o)}refresh();notify('Réseau créé.');
+ };
+ document.getElementById('modelMirror').onclick=()=>{
+  if(!selected||editMode!=='object')return notify('Sélectionne un objet.');
+  const axis=document.getElementById('mirrorAxis').value;if(!['x','y','z'].includes(axis))return;
+  checkpoint();const g=selected.geometry,p=g.attributes.position,component={x:0,y:1,z:2}[axis];
+  for(let i=0;i<p.count;i++){const j=i*3+component;p.array[j]=-p.array[j]}p.needsUpdate=true;
+  if(g.index){const a=g.index.array;for(let i=0;i<a.length;i+=3){const t=a[i+1];a[i+1]=a[i+2];a[i+2]=t}g.index.needsUpdate=true}
+  else{for(const attr of Object.values(g.attributes)){const a=attr.array,n=attr.itemSize;for(let i=0;i<attr.count;i+=3)for(let k=0;k<n;k++){const j=(i+1)*n+k,l=(i+2)*n+k,t=a[j];a[j]=a[l];a[l]=t}attr.needsUpdate=true}}
+  g.computeVertexNormals();g.computeBoundingBox();g.computeBoundingSphere();refresh();notify('Miroir appliqué sur '+axis.toUpperCase()+'.');
+ };
  document.getElementById('modelDuplicate').onclick=duplicate;document.getElementById('modelDelete').onclick=remove;
- document.getElementById('modelRename').onclick=()=>{if(!selected)return;const value=prompt('Nom de l’objet',selected.name);if(value?.trim()){selected.name=value.trim().slice(0,80);refresh()}};
- function serialize(){return group.children.map(o=>({kind:o.userData.kind,name:o.name,position:o.position.toArray(),rotation:[o.rotation.x,o.rotation.y,o.rotation.z],scale:o.scale.toArray(),color:o.material.color.getHex()}))}
- function restore(items){if(!Array.isArray(items)||items.length>500||items.some(x=>!x||!Object.hasOwn(geometries,x.kind)||!['position','rotation','scale'].every(k=>Array.isArray(x[k])&&x[k].length===3&&x[k].every(Number.isFinite))||x.scale.some(v=>v<=0)||typeof x.name!=='string'||!Number.isInteger(x.color)||x.color<0||x.color>0xffffff))throw Error('Modèle invalide');for(const o of [...group.children]){select(o);remove()}for(const x of items){const o=add(x.kind);o.name=x.name.slice(0,80);o.position.fromArray(x.position);o.rotation.set(...x.rotation);o.scale.fromArray(x.scale);o.material.color.setHex(x.color)}select(group.children.at(-1));}
- setEnabled(false);return {group,add,select,setEnabled,serialize,restore};
+ document.getElementById('modelRename').onclick=()=>{if(!selected)return;const value=prompt('Nom de l’objet',selected.name);if(value?.trim()){checkpoint();selected.name=value.trim().slice(0,80);refresh()}};
+ function serialize(){return group.children.map(o=>({kind:o.userData.kind,name:o.name,position:o.position.toArray(),rotation:[o.rotation.x,o.rotation.y,o.rotation.z],scale:o.scale.toArray(),color:o.material.color.getHex(),vertices:Array.from(o.geometry.attributes.position.array),indices:o.geometry.index?Array.from(o.geometry.index.array):null}))}
+ function vertexCount(kind){const g=geometries[kind]();const n=g.attributes.position.array.length;g.dispose();return n}
+ function restore(items){if(!Array.isArray(items)||items.length>500||items.some(x=>!x||!Object.hasOwn(geometries,x.kind)||!['position','rotation','scale'].every(k=>Array.isArray(x[k])&&x[k].length===3&&x[k].every(Number.isFinite))||x.scale.some(v=>v<=0)||(x.vertices!==undefined&&(!Array.isArray(x.vertices)||x.vertices.length%3!==0||x.vertices.length>300000||x.vertices.length<9||(x.indices==null&&x.vertices.length!==vertexCount(x.kind))||!x.vertices.every(Number.isFinite)))||(x.indices!=null&&(!Array.isArray(x.indices)||!x.vertices||x.indices.length%3!==0||x.indices.length>600000||!x.indices.every(i=>Number.isInteger(i)&&i>=0&&i<x.vertices.length/3)))||typeof x.name!=='string'||!Number.isInteger(x.color)||x.color<0||x.color>0xffffff))throw Error('Modèle invalide');const outer=restoring;if(!outer){past.length=0;future.length=0}restoring=true;try{for(const o of [...group.children]){select(o);remove()}for(const x of items){const o=add(x.kind);o.name=x.name.slice(0,80);o.position.fromArray(x.position);o.rotation.set(...x.rotation);o.scale.fromArray(x.scale);o.material.color.setHex(x.color);if(x.vertices){if(x.indices&&x.vertices.length!==o.geometry.attributes.position.array.length){o.geometry.dispose();o.geometry=new THREE.BufferGeometry();o.geometry.setAttribute('position',new THREE.Float32BufferAttribute(x.vertices,3));o.geometry.setIndex(x.indices)}else{o.geometry.attributes.position.array.set(x.vertices);if(x.indices)o.geometry.setIndex(x.indices)}o.geometry.attributes.position.needsUpdate=true;o.geometry.computeVertexNormals();o.geometry.computeBoundingSphere();o.geometry.computeBoundingBox()}}select(group.children.at(-1));}finally{restoring=outer;updateHistory()}}
+ setEnabled(false);updateHistory();return {group,add,select,setEnabled,serialize,restore};
 }
