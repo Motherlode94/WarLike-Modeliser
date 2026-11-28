@@ -22,7 +22,16 @@ try{
  assert.equal(await page.locator('#modelOutliner button').count(),3);
  await page.locator('#modelDelete').click();
  assert.equal(await page.locator('#modelOutliner button').count(),2);
- const saved=page.waitForEvent('download');await page.locator('#modelSave').click();const file=await saved;
+ const tabs=page.locator('.model-inspector-tabs');
+ await tabs.getByRole('button',{name:'Maillage',exact:true}).click();
+ assert.equal(await page.locator('#meshExtrude').isVisible(),true);
+ await tabs.getByRole('button',{name:'Surface',exact:true}).click();
+ assert.equal(await page.locator('#modelColor').isVisible(),true);
+ await tabs.getByRole('button',{name:'Fichiers',exact:true}).click();
+ assert.equal(await page.locator('#modelSave').isVisible(),true);
+ assert.equal(await page.locator('[data-transform="position.x"]').isVisible(),false);
+ const [file]=await Promise.all([page.waitForEvent('download'),page.locator('#modelSave').click()]);
+ assert.ok(file.suggestedFilename().endsWith('.modeliser3d.json'));
  await page.locator('#modelFile').setInputFiles(await file.path());
  await page.waitForFunction(()=>document.querySelector('#message').textContent==='Modèle ouvert.');
  assert.equal(await page.locator('#modelOutliner button').count(),2);
