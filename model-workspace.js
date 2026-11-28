@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {faceOperation} from './mesh-face-operations.js';
 import {bindRigPreview} from './rig-guide.js';
 import {subdivideTriangles} from './mesh-subdivision.js';
 import {bindTimeline,validKeys} from './model-timeline.js';
@@ -40,22 +41,9 @@ export function createModelWorkspace({scene,camera,renderer,orbit,notify}){
  function pickMesh(hit){if(!hit?.face){showSelection([]);return}const p=selected.geometry.attributes.position,ids=[hit.face.a,hit.face.b,hit.face.c];const point=selected.worldToLocal(hit.point.clone());ids.sort((a,b)=>new THREE.Vector3().fromBufferAttribute(p,a).distanceToSquared(point)-new THREE.Vector3().fromBufferAttribute(p,b).distanceToSquared(point));showSelection(ids.slice(0,editMode==='vertex'?1:editMode==='edge'?2:3))}
  document.getElementById('meshMode').onchange=e=>setEditMode(e.target.value);
  document.getElementById('meshMove').onclick=()=>{if(!selected||!picked.length)return;const delta=['X','Y','Z'].map(a=>Number(document.getElementById('meshDelta'+a).value));if(!delta.every(Number.isFinite))return;checkpoint();const p=selected.geometry.attributes.position;const originals=picked.map(i=>new THREE.Vector3().fromBufferAttribute(p,i));for(let i=0;i<p.count;i++){const v=new THREE.Vector3().fromBufferAttribute(p,i);if(originals.some(o=>o.distanceToSquared(v)<1e-12))p.setXYZ(i,v.x+delta[0],v.y+delta[1],v.z+delta[2])}p.needsUpdate=true;selected.geometry.computeVertexNormals();selected.geometry.computeBoundingSphere();selected.geometry.computeBoundingBox();showSelection(picked)};
- // Face extrusion replaces the selected triangle with a cap and three side quads.
- function extrudeFace(){
-  if(!selected||editMode!=='face'||picked.length!==3)return notify('Sélectionne une face triangulaire.');
-  const distance=Number(document.getElementById('extrudeDistance').value);if(!Number.isFinite(distance)||Math.abs(distance)<1e-6||Math.abs(distance)>100)return notify('Distance invalide.');
-  const g=selected.geometry,p=g.attributes.position,vertices=picked.map(i=>new THREE.Vector3().fromBufferAttribute(p,i));
-  const indices=g.index?Array.from(g.index.array):Array.from({length:p.count},(_,i)=>i);
-  let face=-1;for(let i=0;i<indices.length;i+=3)if(indices.slice(i,i+3).every(j=>picked.includes(j))){face=i;break}if(face<0)return;
-  const order=indices.slice(face,face+3),v=order.map(i=>new THREE.Vector3().fromBufferAttribute(p,i));
-  const normal=v[1].clone().sub(v[0]).cross(v[2].clone().sub(v[0])).normalize();if(normal.lengthSq()<.5)return notify('Face dégénérée.');
-  const top=v.map(x=>x.clone().addScaledVector(normal,distance)),positions=Array.from(p.array),start=p.count;
-  for(const x of top)positions.push(...x.toArray());
-  indices.splice(face,3,start,start+1,start+2);
-  for(let i=0;i<3;i++){const j=(i+1)%3;indices.push(order[i],order[j],start+j,order[i],start+j,start+i)}
-  checkpoint();const next=new THREE.BufferGeometry();next.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));next.setIndex(indices);next.computeVertexNormals();next.computeBoundingBox();next.computeBoundingSphere();selected.geometry=next;g.dispose();showSelection([start,start+1,start+2]);notify('Face extrudée.');
- }
- document.getElementById('meshExtrude').onclick=extrudeFace;
+ function applyFaceOperation(mode,amount){if(!selected||editMode!=='face'||picked.length!==3)return notify('Sélectionne une face triangulaire.');try{const result=faceOperation(selected.geometry,picked,mode,amount);checkpoint();selected.geometry.dispose();selected.geometry=result.geometry;showSelection(result.selection);drawUV();notify(mode==='inset'?'Inset appliqué.':'Face extrudée. UV existants conservés ; déplie les côtés si nécessaire.')}catch(e){notify(e.message)}}
+ document.getElementById('meshExtrude').onclick=()=>applyFaceOperation('extrude',Number(document.getElementById('extrudeDistance').value));
+ const insetLabel=document.createElement('label');insetLabel.textContent='Inset (%)';const insetAmount=document.createElement('input');insetAmount.type='number';insetAmount.min='1';insetAmount.max='99';insetAmount.value='25';insetLabel.append(insetAmount);const insetButton=document.createElement('button');insetButton.type='button';insetButton.id='meshInset';insetButton.className='full';insetButton.textContent='Inset de la face';insetButton.onclick=()=>applyFaceOperation('inset',Number(insetAmount.value)/100);document.getElementById('meshExtrude').after(insetLabel,insetButton);
  const list=document.getElementById('modelOutliner'),fields=[...document.querySelectorAll('[data-transform]')];
  const geometries={imported:()=>new THREE.PlaneGeometry(1,1),cube:()=>new THREE.BoxGeometry(1,1,1),sphere:()=>new THREE.SphereGeometry(.6,24,16),cylinder:()=>new THREE.CylinderGeometry(.5,.5,1,24),plane:()=>new THREE.PlaneGeometry(1,1),cone:()=>new THREE.ConeGeometry(.6,1,24)};
  function refresh(){timeline.render();objectGroups.render();drawUV();refreshPBR();list.replaceChildren();for(const object of group.children){const b=document.createElement('button');b.textContent=object.userData.collection?'['+object.userData.collection+'] '+object.name:object.name;b.setAttribute('aria-pressed',String(object===selected));b.onclick=()=>select(object);list.append(b)}for(const f of fields){const [key,axis]=f.dataset.transform.split('.');f.disabled=!selected;f.value=selected?Number((key==='rotation'?THREE.MathUtils.radToDeg(selected[key][axis]):selected[key][axis]).toFixed(4)):''}document.getElementById('modelColor').disabled=!selected;if(selected)document.getElementById('modelColor').value='#'+selected.material.color.getHexString();}
