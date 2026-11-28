@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {readModel,exportStatic} from './model-formats.js';
 import {bindTexturePaint} from './texture-paint.js';
 import {TransformControls} from 'three/addons/controls/TransformControls.js';
 export function createModelWorkspace({scene,camera,renderer,orbit,notify}){
@@ -41,7 +42,7 @@ export function createModelWorkspace({scene,camera,renderer,orbit,notify}){
  }
  document.getElementById('meshExtrude').onclick=extrudeFace;
  const list=document.getElementById('modelOutliner'),fields=[...document.querySelectorAll('[data-transform]')];
- const geometries={cube:()=>new THREE.BoxGeometry(1,1,1),sphere:()=>new THREE.SphereGeometry(.6,24,16),cylinder:()=>new THREE.CylinderGeometry(.5,.5,1,24),plane:()=>new THREE.PlaneGeometry(1,1),cone:()=>new THREE.ConeGeometry(.6,1,24)};
+ const geometries={imported:()=>new THREE.PlaneGeometry(1,1),cube:()=>new THREE.BoxGeometry(1,1,1),sphere:()=>new THREE.SphereGeometry(.6,24,16),cylinder:()=>new THREE.CylinderGeometry(.5,.5,1,24),plane:()=>new THREE.PlaneGeometry(1,1),cone:()=>new THREE.ConeGeometry(.6,1,24)};
  function refresh(){drawUV();refreshPBR();list.replaceChildren();for(const object of group.children){const b=document.createElement('button');b.textContent=object.name;b.setAttribute('aria-pressed',String(object===selected));b.onclick=()=>select(object);list.append(b)}for(const f of fields){const [key,axis]=f.dataset.transform.split('.');f.disabled=!selected;f.value=selected?Number((key==='rotation'?THREE.MathUtils.radToDeg(selected[key][axis]):selected[key][axis]).toFixed(4)):''}document.getElementById('modelColor').disabled=!selected;if(selected)document.getElementById('modelColor').value='#'+selected.material.color.getHexString();}
  function select(o){selected=o||null;texturePaint.refresh();picked=[];clearMarkers();transform.detach();if(enabled&&selected&&editMode==='object')transform.attach(selected);refresh()}
  function add(kind){if(!geometries[kind]||group.children.length>=500)return;checkpoint();const o=new THREE.Mesh(geometries[kind](),new THREE.MeshStandardMaterial({color:0x9ab6cf,roughness:.65,side:kind==='plane'?THREE.DoubleSide:THREE.FrontSide}));o.name=kind+' '+(++serial);o.userData.kind=kind;group.add(o);select(o);return o}
@@ -79,6 +80,8 @@ export function createModelWorkspace({scene,camera,renderer,orbit,notify}){
   else{for(const attr of Object.values(g.attributes)){const a=attr.array,n=attr.itemSize;for(let i=0;i<attr.count;i+=3)for(let k=0;k<n;k++){const j=(i+1)*n+k,l=(i+2)*n+k,t=a[j];a[j]=a[l];a[l]=t}attr.needsUpdate=true}}
   g.computeVertexNormals();g.computeBoundingBox();g.computeBoundingSphere();refresh();notify('Miroir appliqué sur '+axis.toUpperCase()+'.');
  };
+ document.getElementById('formatImport').onchange=async e=>{const file=e.target.files?.[0];if(!file)return;try{const items=await readModel(file);if(group.children.length+items.length>500)throw Error('Limite de 500 objets.');checkpoint();const outer=restoring;restoring=true;try{for(const item of items){const o=add('imported');o.geometry.dispose();o.geometry=item.geometry;o.material.color.setHex(item.color);o.name=item.name.slice(0,80)}refresh()}finally{restoring=outer}notify('Import géométrique terminé : '+items.length+' objet(s). Les textures et animations ne sont pas importées.')}catch(error){notify('Import : '+error.message)}finally{e.target.value=''}};
+ for(const format of ['obj','stl'])document.getElementById('export_'+format).onclick=()=>{try{if(!group.children.length)throw Error('Aucun objet.');group.updateMatrixWorld(true);const data=exportStatic(group,format),url=URL.createObjectURL(new Blob([data.content],{type:data.type})),a=document.createElement('a');a.href=url;a.download='model.'+format;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}catch(error){notify(error.message)}};
  document.getElementById('modelDuplicate').onclick=duplicate;document.getElementById('modelDelete').onclick=remove;
  document.getElementById('modelRename').onclick=()=>{if(!selected)return;const value=prompt('Nom de l’objet',selected.name);if(value?.trim()){checkpoint();selected.name=value.trim().slice(0,80);refresh()}};
  function serialize(){return group.children.map(o=>({kind:o.userData.kind,name:o.name,position:o.position.toArray(),rotation:[o.rotation.x,o.rotation.y,o.rotation.z],scale:o.scale.toArray(),color:o.material.color.getHex(),pbr:{roughness:o.material.roughness,metalness:o.material.metalness,emissive:o.material.emissive.getHex(),emissiveIntensity:o.material.emissiveIntensity,opacity:o.material.opacity},vertices:Array.from(o.geometry.attributes.position.array),indices:o.geometry.index?Array.from(o.geometry.index.array):null,uv:o.geometry.attributes.uv?Array.from(o.geometry.attributes.uv.array):null}))}
