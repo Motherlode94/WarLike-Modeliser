@@ -136,5 +136,5 @@ export function createModelWorkspace({scene,camera,renderer,orbit,notify}){
  const skinPreview=bindSkinPreview({scene,getSelected:()=>selected,notify,checkpoint,getPicked:()=>picked.slice()});
  const boneKeys=bindBoneKeys({getSelected:()=>selected,checkpoint,notify,onPose:(o,pose)=>skinPreview.previewPose(o,pose)});
  const rigPlayback=bindRigPlayback({scene,getSelected:()=>selected,notify});
- setEnabled(false);updateHistory();return {group,add,select,setEnabled,serialize,restore};
+ setEnabled(false);updateHistory();return {group,add,select,setEnabled,serialize,restore,assertTexturesReady:()=>texturePaint.assertReady(group.children)};
 }
