@@ -78,8 +78,8 @@ export function createModelWorkspace({scene,camera,renderer,orbit,notify}){
  function stopUV(){if(uvStroke===null)return;uvStroke=null;texturePaint.endUV();orbit.enabled=true}
  paintToggle.onchange=()=>{stopUV();transform.detach();if(!paintToggle.checked&&enabled&&selected&&editMode==='object')transform.attach(selected)};
  let weightStroke=null;
- function stopWeights(){if(weightStroke===null)return;weightStroke=null;skinPreview.end();orbit.enabled=true}
- renderer.domElement.addEventListener('pointerdown',e=>{if(!enabled||!selected||e.button!==0||!skinPreview.painting()||editMode!=='object')return;const hit=sculptHit(e);if(!hit)return;if(skinPreview.begin(selected.worldToLocal(hit.point.clone()).toArray())){weightStroke=e.pointerId;orbit.enabled=false;renderer.domElement.setPointerCapture(e.pointerId);e.preventDefault();e.stopImmediatePropagation()}},true);
+ function stopWeights(){if(weightStroke===null)return;const id=weightStroke;weightStroke=null;skinPreview.end();if(renderer.domElement.hasPointerCapture(id))renderer.domElement.releasePointerCapture(id);orbit.enabled=true}
+ renderer.domElement.addEventListener('pointerdown',e=>{if(!enabled||!selected||e.button!==0||!skinPreview.painting()||paintToggle.checked||editMode!=='object')return;const hit=sculptHit(e);if(!hit)return;if(skinPreview.begin(selected.worldToLocal(hit.point.clone()).toArray())){weightStroke=e.pointerId;orbit.enabled=false;renderer.domElement.setPointerCapture(e.pointerId);e.preventDefault();e.stopImmediatePropagation()}},true);
  renderer.domElement.addEventListener('pointermove',e=>{if(weightStroke!==e.pointerId)return;const hit=sculptHit(e);if(hit)skinPreview.move(selected.worldToLocal(hit.point.clone()).toArray());e.preventDefault();e.stopImmediatePropagation()},true);
  for(const type of ['pointerup','pointercancel','lostpointercapture'])renderer.domElement.addEventListener(type,e=>{if(weightStroke===e.pointerId){stopWeights();e.stopImmediatePropagation()}},true);
  function uvHit(e){const rect=renderer.domElement.getBoundingClientRect();pointer.set((e.clientX-rect.left)/rect.width*2-1,-(e.clientY-rect.top)/rect.height*2+1);ray.setFromCamera(pointer,camera);return selected?ray.intersectObject(selected,false)[0]?.uv:null}
@@ -88,7 +88,7 @@ export function createModelWorkspace({scene,camera,renderer,orbit,notify}){
  for(const event of ['pointerup','pointercancel','lostpointercapture'])renderer.domElement.addEventListener(event,e=>{if(uvStroke===e.pointerId){stopUV();e.stopImmediatePropagation()}},true);
 
 
- function setEnabled(v){rigPlayback.clear();stopUV();skinPreview.clear();modifierPreview.clear();rigPreview.setEnabled(v);if(!v)endSculpt();enabled=v;group.visible=v;transform.detach();markers.visible=v;if(v&&selected&&editMode==='object'&&!paintToggle.checked)transform.attach(selected);refresh()}
+ function setEnabled(v){stopWeights();rigPlayback.clear();stopUV();skinPreview.clear();modifierPreview.clear();rigPreview.setEnabled(v);if(!v)endSculpt();enabled=v;group.visible=v;transform.detach();markers.visible=v;if(v&&selected&&editMode==='object'&&!paintToggle.checked)transform.attach(selected);refresh()}
  transform.addEventListener('dragging-changed',e=>{orbit.enabled=!e.value;if(e.value)gesture=serialize();else if(gesture){if(JSON.stringify(gesture)!==JSON.stringify(serialize()))checkpoint(gesture);gesture=null}});transform.addEventListener('objectChange',refresh);
  const ray=new THREE.Raycaster(),pointer=new THREE.Vector2();let down=null;
  renderer.domElement.addEventListener('pointerdown',e=>{down=e.button===0&&!transform.axis?{x:e.clientX,y:e.clientY}:null});
