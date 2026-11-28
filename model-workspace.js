@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {subdivideTriangles} from './mesh-subdivision.js';
 import {sculptGeometry} from './sculpt-tools.js';
 import {readModel,exportStatic} from './model-formats.js';
 import {bindTexturePaint} from './texture-paint.js';
@@ -92,6 +93,7 @@ export function createModelWorkspace({scene,camera,renderer,orbit,notify}){
  };
  document.getElementById('formatImport').onchange=async e=>{const file=e.target.files?.[0];if(!file)return;try{const items=await readModel(file);if(group.children.length+items.length>500)throw Error('Limite de 500 objets.');checkpoint();const outer=restoring;restoring=true;try{for(const item of items){const o=add('imported');o.geometry.dispose();o.geometry=item.geometry;o.material.color.setHex(item.color);o.name=item.name.slice(0,80)}refresh()}finally{restoring=outer}notify('Import géométrique terminé : '+items.length+' objet(s). Les textures et animations ne sont pas importées.')}catch(error){notify('Import : '+error.message)}finally{e.target.value=''}};
  for(const format of ['obj','stl'])document.getElementById('export_'+format).onclick=()=>{try{if(!group.children.length)throw Error('Aucun objet.');group.updateMatrixWorld(true);const data=exportStatic(group,format),url=URL.createObjectURL(new Blob([data.content],{type:data.type})),a=document.createElement('a');a.href=url;a.download='model.'+format;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}catch(error){notify(error.message)}};
+ document.getElementById('meshSubdivide').onclick=()=>{if(!selected||editMode!=='object')return notify('Sélectionne un objet en mode Objet.');try{const next=subdivideTriangles(selected.geometry);checkpoint();selected.geometry.dispose();selected.geometry=next;refresh();notify('Subdivision appliquée.')}catch(e){notify(e.message)}};
  document.getElementById('modelDuplicate').onclick=duplicate;document.getElementById('modelDelete').onclick=remove;
  document.getElementById('modelRename').onclick=()=>{if(!selected)return;const value=prompt('Nom de l’objet',selected.name);if(value?.trim()){checkpoint();selected.name=value.trim().slice(0,80);refresh()}};
  function serialize(){return group.children.map(o=>({kind:o.userData.kind,name:o.name,position:o.position.toArray(),rotation:[o.rotation.x,o.rotation.y,o.rotation.z],scale:o.scale.toArray(),color:o.material.color.getHex(),pbr:{roughness:o.material.roughness,metalness:o.material.metalness,emissive:o.material.emissive.getHex(),emissiveIntensity:o.material.emissiveIntensity,opacity:o.material.opacity},vertices:Array.from(o.geometry.attributes.position.array),indices:o.geometry.index?Array.from(o.geometry.index.array):null,textureRGBA:texturePaint.serialize(o),uv:o.geometry.attributes.uv?Array.from(o.geometry.attributes.uv.array):null}))}
