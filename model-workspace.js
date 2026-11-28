@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {bindRigPlayback} from './rig-playback.js';
 import {validWeights} from './skin-core.js';
 import {triangleAtlas} from './uv-atlas.js';
 import {splitSelectedEdges} from './mesh-strip-refinement.js';
@@ -23,7 +24,7 @@ export function createModelWorkspace({scene,camera,renderer,orbit,notify}){
  let selected=null,enabled=false,serial=0,editMode='object',picked=[];
  const past=[],future=[];let restoring=false,gesture=null;
  function updateHistory(){document.getElementById('modelUndo').disabled=!past.length;document.getElementById('modelRedo').disabled=!future.length}
- function checkpoint(before=serialize()){modifierPreview.clear();if(restoring)return;past.push(before);if(past.length>24)past.shift();future.length=0;updateHistory()}
+ function checkpoint(before=serialize()){rigPlayback.clear();modifierPreview.clear();if(restoring)return;past.push(before);if(past.length>24)past.shift();future.length=0;updateHistory()}
  function travel(source,target){if(!source.length)return;const current=serialize(),next=source.pop();restoring=true;try{restore(next);target.push(current)}finally{restoring=false;updateHistory()}}
  document.getElementById('modelUndo').onclick=()=>travel(past,future);document.getElementById('modelRedo').onclick=()=>travel(future,past);
  document.getElementById('modelSnap').onchange=e=>{const on=e.target.checked;transform.setTranslationSnap(on ? .25 : null);transform.setRotationSnap(on?Math.PI/12:null);transform.setScaleSnap(on ? .1 : null)};
@@ -59,7 +60,7 @@ export function createModelWorkspace({scene,camera,renderer,orbit,notify}){
  const list=document.getElementById('modelOutliner'),fields=[...document.querySelectorAll('[data-transform]')];
  const geometries={imported:()=>new THREE.PlaneGeometry(1,1),cube:()=>new THREE.BoxGeometry(1,1,1),sphere:()=>new THREE.SphereGeometry(.6,24,16),cylinder:()=>new THREE.CylinderGeometry(.5,.5,1,24),plane:()=>new THREE.PlaneGeometry(1,1),cone:()=>new THREE.ConeGeometry(.6,1,24)};
  function refresh(){refreshBoolean();boneKeys.render();timeline.render();objectGroups.render();drawUV();refreshPBR();list.replaceChildren();for(const object of group.children){const b=document.createElement('button');b.textContent=object.userData.collection?'['+object.userData.collection+'] '+object.name:object.name;b.setAttribute('aria-pressed',String(object===selected));b.onclick=()=>select(object);list.append(b)}for(const f of fields){const [key,axis]=f.dataset.transform.split('.');f.disabled=!selected;f.value=selected?Number((key==='rotation'?THREE.MathUtils.radToDeg(selected[key][axis]):selected[key][axis]).toFixed(4)):''}document.getElementById('modelColor').disabled=!selected;if(selected)document.getElementById('modelColor').value='#'+selected.material.color.getHexString();}
- function select(o){stopUV();skinPreview.clear();modifierPreview.clear();endSculpt();selected=o||null;rigPreview.sync();texturePaint.refresh();picked=[];clearMarkers();transform.detach();if(enabled&&selected&&editMode==='object'&&!paintToggle.checked)transform.attach(selected);refresh()}
+ function select(o){rigPlayback.clear();stopUV();skinPreview.clear();modifierPreview.clear();endSculpt();selected=o||null;rigPreview.sync();texturePaint.refresh();picked=[];clearMarkers();transform.detach();if(enabled&&selected&&editMode==='object'&&!paintToggle.checked)transform.attach(selected);refresh()}
  function add(kind){if(!geometries[kind]||group.children.length>=500)return;checkpoint();const o=new THREE.Mesh(geometries[kind](),new THREE.MeshStandardMaterial({color:0x9ab6cf,roughness:.65,side:kind==='plane'?THREE.DoubleSide:THREE.FrontSide}));o.name=kind+' '+(++serial);o.userData.kind=kind;group.add(o);select(o);return o}
  function remove(){if(!selected)return;checkpoint();const o=selected;select(null);group.remove(o);o.geometry.dispose();o.material.dispose();refresh()}
  function duplicate(){if(!selected||group.children.length>=500)return;checkpoint();const o=selected.clone(false);o.geometry=selected.geometry.clone();o.material=selected.material.clone();o.name=selected.userData.kind+' '+(++serial);o.position.x+=.25;group.add(o);select(o)}
@@ -74,7 +75,7 @@ export function createModelWorkspace({scene,camera,renderer,orbit,notify}){
  for(const event of ['pointerup','pointercancel','lostpointercapture'])renderer.domElement.addEventListener(event,e=>{if(uvStroke===e.pointerId){stopUV();e.stopImmediatePropagation()}},true);
 
 
- function setEnabled(v){stopUV();skinPreview.clear();modifierPreview.clear();rigPreview.setEnabled(v);if(!v)endSculpt();enabled=v;group.visible=v;transform.detach();markers.visible=v;if(v&&selected&&editMode==='object'&&!paintToggle.checked)transform.attach(selected);refresh()}
+ function setEnabled(v){rigPlayback.clear();stopUV();skinPreview.clear();modifierPreview.clear();rigPreview.setEnabled(v);if(!v)endSculpt();enabled=v;group.visible=v;transform.detach();markers.visible=v;if(v&&selected&&editMode==='object'&&!paintToggle.checked)transform.attach(selected);refresh()}
  transform.addEventListener('dragging-changed',e=>{orbit.enabled=!e.value;if(e.value)gesture=serialize();else if(gesture){if(JSON.stringify(gesture)!==JSON.stringify(serialize()))checkpoint(gesture);gesture=null}});transform.addEventListener('objectChange',refresh);
  const ray=new THREE.Raycaster(),pointer=new THREE.Vector2();let down=null;
  renderer.domElement.addEventListener('pointerdown',e=>{down=e.button===0&&!transform.axis?{x:e.clientX,y:e.clientY}:null});
@@ -121,5 +122,6 @@ export function createModelWorkspace({scene,camera,renderer,orbit,notify}){
  const modifierPreview=bindModifierPreview({scene,getSelected:()=>selected,checkpoint,refresh,notify});
  const skinPreview=bindSkinPreview({scene,getSelected:()=>selected,notify,checkpoint,getPicked:()=>picked.slice()});
  const boneKeys=bindBoneKeys({getSelected:()=>selected,checkpoint,notify});
+ const rigPlayback=bindRigPlayback({scene,getSelected:()=>selected,notify});
  setEnabled(false);updateHistory();return {group,add,select,setEnabled,serialize,restore};
 }
